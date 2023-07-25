@@ -4,7 +4,7 @@ SendMode Input
 SetBatchLines -1
 SetWorkingDir A_ScriptDir
 
-#IfWinActive Diablo IV
+#IfWinActive ahk_exe Diablo IV.exe
 
 #Persistent
 
