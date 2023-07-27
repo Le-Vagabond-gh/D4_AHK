@@ -37,15 +37,18 @@ CreateBitMap(ByRef strB64) {
 
 ;F2::Reload
 ;F4::ExitApp
-F3::Pause Toggle
+F3::
+Suspend
+Pause,,1
+return
 
 ~RButton::
 If (Toggle = "")
 {
-    SetTimer, Loop1, 5900
+    SetTimer, Loop1, 40
     SetTimer, Loope, 10
     SetTimer, Loopr, 20
-    SetTimer, Loopq, 10
+    SetTimer, Loopq, 20
     SetTimer, Loopw, 20
     Toggle := 1
 }
@@ -60,6 +63,7 @@ Else
 }
 return
 
+#IfWinActive ahk_exe Diablo IV.exe
 Loop1:
 Send, g ; Sends 1
 return
