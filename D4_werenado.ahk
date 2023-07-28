@@ -38,11 +38,29 @@ CreateBitMap(ByRef strB64) {
 ;F2::Reload
 ;F4::ExitApp
 F3::
+~SC003::
 Suspend
-Pause,,1
+
+SetTimer, Loop1, Off
+SetTimer, Loope, Off
+SetTimer, Loopr, Off
+SetTimer, Loopq, Off
+SetTimer, Loopw, Off
+Toggle := ""
+
+MouseGetPos, xpos, ypos  ; Get the current mouse position.
+xpos += 25  ; Move the tooltip 25 pixels to the right.
+ypos -= 25  ; Move the tooltip 25 pixels up.
+ToolTip,% a_isSuspended? "-":"+", %xpos%, %ypos%
+SetTimer, RemoveToolTip, -2000
 return
 
-~RButton::
+RemoveToolTip:
+Tooltip
+return
+
+
+RButton::
 If (Toggle = "")
 {
     SetTimer, Loop1, 40
