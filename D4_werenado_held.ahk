@@ -60,29 +60,30 @@ RemoveToolTip:
 Tooltip
 return
 
-
 RButton::
-If (Toggle = "")
-{
+    ; Start all the timers
     SetTimer, Loop1, 10
     SetTimer, Loope, 50
     SetTimer, Loopr, 20
     SetTimer, Loopq, 20
     SetTimer, Loopw, 20
     SetTimer, Looph, 20
-    Toggle := 1
-}
-Else
-{
-    SetTimer, Loop1, Off
-    SetTimer, Loope, Off
-    SetTimer, Loopr, Off
-    SetTimer, Loopq, Off
-    SetTimer, Loopw, Off
-    SetTimer, Looph, Off
-    Toggle := ""
-}
-return
+    SetTimer, CheckRButton, 10
+Return
+
+CheckRButton:
+    If !GetKeyState("RButton", "P")
+    {
+        ; Stop all the timers
+        SetTimer, Loop1, Off
+        SetTimer, Loope, Off
+        SetTimer, Loopr, Off
+        SetTimer, Loopq, Off
+        SetTimer, Loopw, Off
+        SetTimer, Looph, Off
+        SetTimer, CheckRButton, Off  ; Turn off this timer
+    }
+Return
 
 #IfWinActive ahk_exe Diablo IV.exe
 Loop1:
