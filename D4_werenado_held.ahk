@@ -62,12 +62,12 @@ return
 
 RButton::
     ; Start all the timers
-    SetTimer, Loop1, 10
+    SetTimer, Loop1, 50
     SetTimer, Loope, 50
     SetTimer, Loopr, 20
     SetTimer, Loopq, 20
     SetTimer, Loopw, 20
-    SetTimer, Looph, 20
+    ;SetTimer, Looph, 20
     SetTimer, CheckRButton, 10
 Return
 
