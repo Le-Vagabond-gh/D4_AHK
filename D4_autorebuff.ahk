@@ -20,7 +20,7 @@ slot1_coords := StrSplit(slot1_coords, ", ") ; Split the string into x and y coo
 PixelGetColor, slot1activecolor, % slot1_coords[1], % slot1_coords[2] ; Use the coordinates to get the color
 
 ; slot 2 
-slot2_isabuff := true
+slot2_isabuff := false
 slot2_coords := "869, 978"
 slot2_coords := StrSplit(slot2_coords, ", ") ; Split the string into x and y coordinates
 PixelGetColor, slot2activecolor, % slot2_coords[1], % slot2_coords[2] ; Use the coordinates to get the color
@@ -33,7 +33,7 @@ PixelGetColor, slot3activecolor, % slot3_coords[1], % slot3_coords[2] ; Use the 
 
 ; slot 4 
 ; PixelGetColor, slot4activecolor, 993, 978
-slot4_isabuff := true
+slot4_isabuff := false
 slot4_coords := "993, 978"
 slot4_coords := StrSplit(slot4_coords, ", ") ; Split the string into x and y coordinates
 PixelGetColor, slot4activecolor, % slot4_coords[1], % slot4_coords[2] ; Use the coordinates to get the color

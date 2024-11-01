@@ -59,7 +59,7 @@ return
 PressA:
 Send a
 ; lightning spear
-Send, {XButton1}
+; Send, {XButton1}
 ; dodge (for esu crit buff)
 
 ; Check slot 1
