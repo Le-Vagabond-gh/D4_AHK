@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Diablo Trade Rune Price Checker
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Adds a button to check rune prices on diablo.trade
 // @author       Le Vagabond
 // @match        https://diablo.trade/*
@@ -192,8 +192,8 @@
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
     headerRow.style.backgroundColor = colors.headerBg;
-    // Columns: Rune, Bottom Price, Top Price, Average Price
-    ['Rune', 'Bottom Price', 'Top Price', 'Average Price'].forEach(text => {
+    // Add Median Price column to the header
+    ['Rune', 'Bottom Price', 'Top Price', 'Median Price', 'Average Price'].forEach(text => {
       const th = document.createElement('th');
       th.textContent = text;
       th.style.border = `1px solid ${colors.tableBorder}`;
@@ -230,6 +230,17 @@
       const lower = q1 - 1.5 * iqr;
       const upper = q3 + 1.5 * iqr;
       return prices.filter(p => p >= lower && p <= upper);
+    }
+
+    // Helper function to calculate median
+    function calculateMedian(prices) {
+      if (prices.length === 0) return 0;
+      const sorted = [...prices].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 0) {
+        return (sorted[middle - 1] + sorted[middle]) / 2;
+      }
+      return sorted[middle];
     }
 
     // Helper function to fetch prices for a rune
@@ -301,6 +312,13 @@
         topCell.style.padding = '8px';
         row.appendChild(topCell);
 
+        // Median Price (new)
+        const medianCell = document.createElement('td');
+        medianCell.textContent = '⏳';
+        medianCell.style.border = `1px solid ${colors.tableBorder}`;
+        medianCell.style.padding = '8px';
+        row.appendChild(medianCell);
+
         // Avg Price
         const avgCell = document.createElement('td');
         avgCell.textContent = '⏳';
@@ -310,7 +328,7 @@
 
         tbody.appendChild(row);
 
-        runeRows[rune] = { row, bottomCell, topCell, avgCell };
+        runeRows[rune] = { row, bottomCell, topCell, medianCell, avgCell };
       });
 
       const concurrency = 4;
@@ -329,10 +347,12 @@
                 if (prices.length > 0) {
                   const pricesM = prices.map(p => p / 1_000_000);
                   const avg = Math.ceil(pricesM.reduce((a, b) => a + b, 0) / pricesM.length);
+                  const median = Math.ceil(calculateMedian(pricesM));
                   result = {
                     rune,
                     topPrice: Math.max(...pricesM),
                     bottomPrice: Math.min(...pricesM),
+                    medianPrice: median,
                     avgPrice: avg
                   };
                 } else {
@@ -340,13 +360,15 @@
                     rune,
                     topPrice: 0,
                     bottomPrice: 0,
+                    medianPrice: 0,
                     avgPrice: 0
                   };
                 }
                 // Update the table row for this rune
-                const { bottomCell, topCell, avgCell } = runeRows[rune];
+                const { bottomCell, topCell, medianCell, avgCell } = runeRows[rune];
                 bottomCell.textContent = result.bottomPrice ? result.bottomPrice.toLocaleString(undefined, {maximumFractionDigits: 2}) + 'm' : '0';
                 topCell.textContent = result.topPrice ? result.topPrice.toLocaleString(undefined, {maximumFractionDigits: 2}) + 'm' : '0';
+                medianCell.textContent = result.medianPrice ? result.medianPrice.toLocaleString(undefined, {maximumFractionDigits: 2}) + 'm' : '0';
                 avgCell.textContent = result.avgPrice ? result.avgPrice.toLocaleString() + 'm' : '0';
                 runeResults[rune] = result;
                 completed++;
