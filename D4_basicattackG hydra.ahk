@@ -8,43 +8,28 @@ SetWorkingDir, %A_ScriptDir%
 
 #Persistent
 
-global LastAPress := 0
 global LastDollarPress := 0
-global LastRPress := 0
-global LastPotion := 0
+global LastEPress := 0
 
 FileRead, Base64PNG_on, D4_basicattackG_icon.b64
 Menu Tray, Icon, % "HBITMAP:*" hICON := CreateBitMap(Base64PNG_on)
 
-SetTimer, CheckKeys, 150
+SetTimer, CheckKeys, 50
 return
 
 CheckKeys:
 if GetKeyState("LButton", "P") && GetKeyState("Space", "P")
 {
-	if (A_TickCount - LastPotion >= 6000) {
-        Send, {Blind}q
-        LastPotion := A_TickCount
-    }
-	if (A_TickCount - LastAPress >= 5000) {
-        Send, {Blind}a
-        LastAPress := A_TickCount
-    }
-
-    if (A_TickCount - LastRPress >= 3500) {
-		Sleep 350
-        Send, {Blind}r
-        LastRPress := A_TickCount
-		Sleep 50
-    }
-
-    if (A_TickCount - LastDollarPress >= 3000) {
+    if (A_TickCount - LastDollarPress >= 4200) {
         Send, {Blind}$
         LastDollarPress := A_TickCount
     }
 
-    Send, {Blind}g
-    Send, {Blind}h
+	Send, {Blind}g
+	Send, {Blind}e
+	Send, {Blind}z
+	Send, {Blind}h
+
 }
 return
 

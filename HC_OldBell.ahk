@@ -4,48 +4,19 @@ SendMode, Input
 SetBatchLines, -1
 SetWorkingDir, %A_ScriptDir%
 
-#IfWinActive ahk_exe Diablo IV.exe
+#IfWinActive ahk_exe Hell Clock.exe
 
 #Persistent
-
-global LastAPress := 0
-global LastDollarPress := 0
-global LastRPress := 0
-global LastPotion := 0
 
 FileRead, Base64PNG_on, D4_basicattackG_icon.b64
 Menu Tray, Icon, % "HBITMAP:*" hICON := CreateBitMap(Base64PNG_on)
 
-SetTimer, CheckKeys, 150
+~e::
+    Send, {z down}{r down}{a down}{RButton down}
 return
 
-CheckKeys:
-if GetKeyState("LButton", "P") && GetKeyState("Space", "P")
-{
-	if (A_TickCount - LastPotion >= 6000) {
-        Send, {Blind}q
-        LastPotion := A_TickCount
-    }
-	if (A_TickCount - LastAPress >= 5000) {
-        Send, {Blind}a
-        LastAPress := A_TickCount
-    }
-
-    if (A_TickCount - LastRPress >= 3500) {
-		Sleep 350
-        Send, {Blind}r
-        LastRPress := A_TickCount
-		Sleep 50
-    }
-
-    if (A_TickCount - LastDollarPress >= 3000) {
-        Send, {Blind}$
-        LastDollarPress := A_TickCount
-    }
-
-    Send, {Blind}g
-    Send, {Blind}h
-}
+~e up::
+    Send, {z up}{r up}{a up}{RButton up}
 return
 
 CreateBitMap(ByRef strB64) {
