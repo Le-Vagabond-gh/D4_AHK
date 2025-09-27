@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Diablo Trade Rune Price Checker
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Adds a button to check rune prices on diablo.trade
 // @author       Le Vagabond
 // @match        https://diablo.trade/*
@@ -110,7 +110,7 @@
     const container = document.createElement('div');
     container.id = 'rune-price-checker-container';
     container.style.position = 'fixed';
-    container.style.top = '10px';
+    container.style.top = '70px';
     container.style.left = '50%';
     container.style.transform = 'translateX(-50%)';
     container.style.backgroundColor = colors.background;
