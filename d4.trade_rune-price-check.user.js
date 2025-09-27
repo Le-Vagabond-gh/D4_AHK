@@ -6,6 +6,8 @@
 // @author       Le Vagabond
 // @match        https://diablo.trade/*
 // @grant        none
+// @updateURL    https://github.com/Le-Vagabond-gh/D4_AHK/raw/refs/heads/main/d4.trade_rune-price-check.user.js
+// @downloadURL  https://github.com/Le-Vagabond-gh/D4_AHK/raw/refs/heads/main/d4.trade_rune-price-check.user.js
 // ==/UserScript==
 
 (function() {
