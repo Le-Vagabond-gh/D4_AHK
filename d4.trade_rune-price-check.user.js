@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Diablo Trade Rune Price Checker
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Adds a button to check rune prices on diablo.trade
 // @author       Le Vagabond
 // @match        https://diablo.trade/*
 // @grant        none
+// @run-at       document-start
 // @updateURL    https://github.com/Le-Vagabond-gh/D4_AHK/raw/refs/heads/main/d4.trade_rune-price-check.user.js
 // @downloadURL  https://github.com/Le-Vagabond-gh/D4_AHK/raw/refs/heads/main/d4.trade_rune-price-check.user.js
 // ==/UserScript==
@@ -13,16 +14,254 @@
 (function() {
   'use strict';
 
+  const NEXT_HEADERS_FALLBACK = {
+    nextAction: '60102b850c82b26db68018c0d07efd8b20f687d07b',
+    nextRouterStateTree: '%5B%22%22%2C%7B%22children%22%3A%5B%22(app)%22%2C%7B%22children%22%3A%5B%22(session)%22%2C%7B%22children%22%3A%5B%22listings%22%2C%7B%22children%22%3A%5B%22(search)%22%2C%7B%22children%22%3A%5B%22items%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D'
+  };
+
+  const nextHeadersCache = {
+    nextAction: null,
+    nextRouterStateTree: null,
+    updatedAt: 0
+  };
+
+  function normalizeHeadersToLowerMap(headers) {
+    const out = {};
+    if (!headers) return out;
+    try {
+      if (headers instanceof Headers) {
+        headers.forEach((v, k) => {
+          out[String(k).toLowerCase()] = String(v);
+        });
+        return out;
+      }
+      if (Array.isArray(headers)) {
+        for (const pair of headers) {
+          if (!pair || pair.length < 2) continue;
+          out[String(pair[0]).toLowerCase()] = String(pair[1]);
+        }
+        return out;
+      }
+      for (const k of Object.keys(headers)) {
+        out[String(k).toLowerCase()] = String(headers[k]);
+      }
+    } catch {
+    }
+    return out;
+  }
+
+  function captureNextHeadersFromMap(map) {
+    if (!map) return;
+    const action = map['next-action'];
+    const tree = map['next-router-state-tree'];
+
+    let changed = false;
+    if (action && action !== nextHeadersCache.nextAction) {
+      nextHeadersCache.nextAction = action;
+      changed = true;
+    }
+    if (tree && tree !== nextHeadersCache.nextRouterStateTree) {
+      nextHeadersCache.nextRouterStateTree = tree;
+      changed = true;
+    }
+
+    if (changed) nextHeadersCache.updatedAt = Date.now();
+  }
+
+  function tryCaptureNextHeadersFromFetchArgs(input, init) {
+    try {
+      if (input && typeof input === 'object' && input.headers) {
+        captureNextHeadersFromMap(normalizeHeadersToLowerMap(input.headers));
+      }
+      if (init && init.headers) {
+        captureNextHeadersFromMap(normalizeHeadersToLowerMap(init.headers));
+      }
+    } catch {
+    }
+  }
+
+  function installFetchCaptureHook() {
+    try {
+      if (window.__d4TradeFetchHookInstalled) return;
+      window.__d4TradeFetchHookInstalled = true;
+
+      const originalFetch = window.fetch;
+      if (typeof originalFetch !== 'function') return;
+
+      window.fetch = function(input, init) {
+        tryCaptureNextHeadersFromFetchArgs(input, init);
+        return originalFetch.call(this, input, init);
+      };
+    } catch {
+    }
+  }
+
+  installFetchCaptureHook();
+
+  function getListingsItemsNextHeaders() {
+    const nextAction = nextHeadersCache.nextAction || NEXT_HEADERS_FALLBACK.nextAction;
+    const nextRouterStateTree = nextHeadersCache.nextRouterStateTree || NEXT_HEADERS_FALLBACK.nextRouterStateTree;
+
+    if (!nextHeadersCache.nextAction || !nextHeadersCache.nextRouterStateTree) {
+      console.warn(
+        '[Rune Price Checker] Using fallback Next headers. If searches start failing after a diablo.trade deploy, reload and let the page load once so the script can auto-capture new headers.'
+      );
+    }
+
+    return {
+      'next-action': nextAction,
+      'next-router-state-tree': nextRouterStateTree
+    };
+  }
+
+  function chunkArray(arr, size) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+  }
+
+  function extractListingIdsFromRscText(text) {
+    const key = '"listings":[';
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    let best = [];
+    let fromIndex = 0;
+
+    while (true) {
+      const keyIndex = text.indexOf(key, fromIndex);
+      if (keyIndex === -1) break;
+
+      const start = keyIndex + key.length - 1;
+      let i = start;
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+
+      for (; i < text.length; i++) {
+        const ch = text[i];
+
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch === '\\') {
+            escaped = true;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+
+        if (ch === '[') depth++;
+        if (ch === ']') {
+          depth--;
+          if (depth === 0) {
+            const arrayText = text.slice(start, i + 1);
+            try {
+              const parsed = JSON.parse(arrayText);
+              if (
+                Array.isArray(parsed) &&
+                parsed.length > 0 &&
+                parsed.every(v => typeof v === 'string' && uuidRe.test(v))
+              ) {
+                if (parsed.length > best.length) best = parsed;
+              }
+            } catch {
+            }
+            break;
+          }
+        }
+      }
+
+      fromIndex = i + 1;
+    }
+
+    return best;
+  }
+
+  let runeBtnObserver = null;
+  let addButtonAttempts = 0;
+  let lastInjectAt = 0;
+  let injectQueued = false;
+
+  function getMainNavUl() {
+    return (
+      document.querySelector('header nav[aria-label="Main"] ul[data-orientation="horizontal"]') ||
+      document.querySelector('header nav[aria-label="Main"] ul') ||
+      document.querySelector('header nav ul[data-orientation="horizontal"]') ||
+      document.querySelector('header nav ul')
+    );
+  }
+
+  function findSupportUsLi(root) {
+    if (!root) return null;
+    const koFiLink = root.querySelector('a[href="https://ko-fi.com/diablotrade"]');
+    if (koFiLink) return koFiLink.closest('li');
+
+    const candidates = root.querySelectorAll('a,button');
+    for (const el of candidates) {
+      const text = (el.textContent || '').trim();
+      if (text.includes('Support Us')) {
+        const li = el.closest('li');
+        if (li) return li;
+      }
+    }
+    return null;
+  }
+
+  function queueAddButton() {
+    const now = Date.now();
+    if (injectQueued) return;
+    if (now - lastInjectAt < 750) return;
+    injectQueued = true;
+    setTimeout(() => {
+      injectQueued = false;
+      lastInjectAt = Date.now();
+      addButtonWhenReady();
+    }, 0);
+  }
+
+  function ensureButtonObserver() {
+    if (runeBtnObserver) return;
+    runeBtnObserver = new MutationObserver(() => {
+      if (!document.getElementById('rune-price-checker-btn-li')) {
+        queueAddButton();
+      }
+    });
+    const root = document.body || document.documentElement;
+    if (root) runeBtnObserver.observe(root, { childList: true, subtree: true });
+  }
+
   // Wait for the header to be available
   function addButtonWhenReady() {
-    const targetDiv = document.querySelector('header.sticky nav div.flex.items-center.gap-2');
-    if (!targetDiv) {
+    if (document.getElementById('rune-price-checker-btn-li')) return;
+
+    const navUl = getMainNavUl();
+    const supportLi = findSupportUsLi(navUl);
+    if (!navUl || !supportLi) {
+      ensureButtonObserver();
+      addButtonAttempts++;
+      if (addButtonAttempts === 30) {
+        console.warn('[RunePriceChecker] Header nav target not found yet.');
+      }
       setTimeout(addButtonWhenReady, 500);
       return;
     }
 
+    ensureButtonObserver();
+
+    // Create the LI container (required by the site header)
+    const li = document.createElement('li');
+    li.id = 'rune-price-checker-btn-li';
+    li.style.position = 'relative';
+
     // Create the button
     const runeBtn = document.createElement('button');
+    runeBtn.type = 'button';
     // Remove text, add image
     runeBtn.style.background = '#222';
     runeBtn.style.color = '#ffd700';
@@ -55,14 +294,11 @@
     tooltip.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
     tooltip.style.pointerEvents = 'none';
 
-    // Container for positioning relative to button
-    const btnWrapper = document.createElement('span');
-    btnWrapper.style.position = 'relative';
-    btnWrapper.appendChild(runeBtn);
-    btnWrapper.appendChild(tooltip);
+    li.appendChild(runeBtn);
+    li.appendChild(tooltip);
 
     const runeImg = document.createElement('img');
-    runeImg.src = 'https://diablo.trade/_next/image?url=%2Fassets%2Frunes%2Fjah.webp&w=64&q=75';
+    runeImg.src = 'https://cdn.static.diablo.trade/game/materials/rune/jah.webp';
     runeImg.alt = 'Rune Price Checker';
     runeImg.style.width = '24px';
     runeImg.style.height = '24px';
@@ -80,7 +316,11 @@
     });
     runeBtn.addEventListener('click', showRunePriceChecker);
 
-    targetDiv.appendChild(btnWrapper);
+    if (supportLi.nextSibling) {
+      navUl.insertBefore(li, supportLi.nextSibling);
+    } else {
+      navUl.appendChild(li);
+    }
   }
 
   // Main logic moved to a function
@@ -103,7 +343,7 @@
 
     // List of runes from runes.txt
     const runes = [
-      "Ahu", "Bac", "Ceh", "Cem", "Chac", "Cir", "Eom", "Feo", "Gar", "Igni", "Jah", "Kry", "Lac", "Lith", "Lum", "Met", "Moni", "Mot", "Nagu", "Neo", "Ner", "Noc", "Ohm", "Poc", "Qax", "Qua", "Que", "Tal", "Tam", "Teb", "Tec", "Thul", "Ton", "Tun", "Tzic", "Ur", "Vex", "Wat", "Xal", "Xan", "Xol", "Yax", "Yom", "Yul", "Zan", "Zec"
+      "Ahu", "Bac", "Cem", "Cip", "Cir", "Feo", "Hak", "Igni", "Kaa", "Lith", "Moni", "Nagu", "Neo", "Noc", "Pac", "Poc", "Tam", "Tza", "Ur", "Xol", "Yax", "Yul", "Zan", "Ceh", "Cha", "Chac", "Ehe", "Eom", "Gar", "Ixk", "Ixt", "Jah", "Kel", "Kry", "Lac", "Lum", "May", "Met", "Mot", "Nam", "Ner", "Ohm", "Ono", "Qax", "Qua", "Que", "Tal", "Teb", "Tec", "Thar", "Thul", "Ton", "Tun", "Tzic", "Ura", "Vex", "Wat", "Xal", "Xan", "Yom", "Zec", "Zid"
     ];
 
     // Create a container for our results
@@ -134,7 +374,7 @@
     header.style.marginBottom = '10px';
 
     const title = document.createElement('h2');
-    title.textContent = 'Rune Price Checker';
+    title.textContent = 'Rune Price Checker (online sellers only)';
     title.style.color = colors.text;
     title.style.margin = '0';
     title.style.borderBottom = `1px solid ${colors.border}`;
@@ -193,7 +433,7 @@
     const headerRow = document.createElement('tr');
     headerRow.style.backgroundColor = colors.headerBg;
     // Add Median Price column to the header
-    ['Rune', 'Bottom Price', 'Top Price', 'Median Price', 'Average Price'].forEach(text => {
+    ['Rune', 'Lowest Price', 'Highest Price', 'Median Price', 'Average Price'].forEach(text => {
       const th = document.createElement('th');
       th.textContent = text;
       th.style.border = `1px solid ${colors.tableBorder}`;
@@ -214,7 +454,7 @@
 
     // Add indicator for data source
     const info = document.createElement('div');
-    info.textContent = 'Showing prices from the most recent 100 results (last 2 days max)';
+    info.textContent = 'Showing prices from online SELL listings (first 100 results, outliers removed)';
     info.style.fontSize = '12px';
     info.style.color = '#aaa';
     info.style.margin = '8px 0 0 0';
@@ -222,14 +462,31 @@
 
     // Helper function to filter outliers using the IQR method
     function filterOutliers(prices) {
-      if (prices.length < 4) return prices; // Not enough data to filter
-      const sorted = [...prices].sort((a, b) => a - b);
+      const sorted = (prices || [])
+        .filter(p => typeof p === 'number' && Number.isFinite(p) && p > 0)
+        .sort((a, b) => a - b);
+
+      if (sorted.length < 4) return sorted;
       const q1 = sorted[Math.floor((sorted.length / 4))];
       const q3 = sorted[Math.floor((sorted.length * (3 / 4)))];
       const iqr = q3 - q1;
       const lower = q1 - 1.5 * iqr;
       const upper = q3 + 1.5 * iqr;
-      return prices.filter(p => p >= lower && p <= upper);
+
+      let filtered = sorted.filter(p => p >= lower && p <= upper);
+
+      if (filtered.length >= 4) {
+        const trim = filtered.length >= 20 ? Math.floor(filtered.length * 0.05) : 0;
+        if (trim > 0) filtered = filtered.slice(trim, filtered.length - trim);
+
+        const med = calculateMedian(filtered);
+        if (med > 0) {
+          const relativeFloor = med * 0.10;
+          filtered = filtered.filter(p => p >= relativeFloor);
+        }
+      }
+
+      return filtered;
     }
 
     // Helper function to calculate median
@@ -245,34 +502,81 @@
 
     // Helper function to fetch prices for a rune
     async function getRunePrices(rune) {
-      // Use createdAt filter for last 2 days, no limit param
-      const url = `${location.origin}/api/items/search?cursor=1&mode=season+softcore&rune=${encodeURIComponent(rune)}&sort=newest&type=WTB&price=500000,1000000000`;
+      const formData = new FormData();
+      const queryPayload = {
+        listingType: "ITEM",
+        name: rune,
+        gameMode: "SEASONAL_SOFTCORE",
+        listingMode: "SELLING",
+        onlineStatus: "ONLINE",
+        itemCategory: "",
+        itemRarity: "",
+        sockets: "",
+        greaterAffixes: "",
+        classType: "",
+        auctionType: "",
+        listPeriod: "",
+        priceMin: "",
+        priceMax: "",
+        itemPowerMin: "0",
+        itemPowerMax: "800",
+        levelRequirementMin: "0",
+        levelRequirementMax: "60",
+        statFilters: [],
+        priceVisibility: "ANY",
+        sortAttributeDirection: "desc"
+      };
+
+      formData.append("1_input", JSON.stringify(queryPayload));
+      formData.append("0", JSON.stringify([{ "error": "" }, "$K1"]));
+
       try {
-        const resp = await fetch(url);
-        const data = await resp.json();
-        // Debug: log the raw data for this rune
-        console.log(`[RunePriceChecker] ${rune} raw data:`, data);
+        const nextHeaders = getListingsItemsNextHeaders();
+        const searchResponse = await fetch("https://diablo.trade/listings/items", {
+          method: "POST",
+          headers: {
+            "Accept": "text/x-component",
+            ...nextHeaders
+          },
+          credentials: "include",
+          body: formData
+        });
 
-        // Only include items created in the last 2 days, then take the most recent 100
-        const now = Date.now();
-        const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
-        const filtered = (data.data || [])
-          .filter(item =>
-            typeof item.price === 'number' &&
-            item.createdAt &&
-            (now - new Date(item.createdAt).getTime() <= twoDaysMs)
-          )
-          .slice(0, 100);
+        if (!searchResponse.ok && searchResponse.status !== 303) {
+          return [];
+        }
 
-        let prices = filtered.map(item => item.price);
+        const searchText = await searchResponse.text();
+        const listingIds = extractListingIdsFromRscText(searchText);
+        if (listingIds.length === 0) return [];
 
-        // Remove outliers
-        prices = filterOutliers(prices);
+        const limitedIds = listingIds.slice(0, 100);
+        const idChunks = chunkArray(limitedIds, 10);
+        let items = [];
 
-        // Debug: log filtered prices for this rune
-        console.log(`[RunePriceChecker] ${rune} filtered prices (outliers removed):`, prices);
+        const detailsConcurrency = 3;
+        for (let i = 0; i < idChunks.length; i += detailsConcurrency) {
+          const batch = idChunks.slice(i, i + detailsConcurrency);
+          const parts = await Promise.all(
+            batch.map(async (ids) => {
+              const detailsResponse = await fetch(`https://diablo.trade/api/listing/get?ids=${ids.join(',')}`, {
+                method: "GET",
+                headers: { "Accept": "application/json" },
+                credentials: "include"
+              });
+              if (!detailsResponse.ok) return [];
+              const part = await detailsResponse.json();
+              return Array.isArray(part) ? part : [];
+            })
+          );
+          for (const part of parts) items = items.concat(part);
+        }
 
-        return prices;
+        const prices = items
+          .map(i => i && i.rawPrice)
+          .filter(p => typeof p === 'number' && !isNaN(p) && p > 0);
+
+        return filterOutliers(prices);
       } catch (error) {
         console.error(`Error fetching ${rune}:`, error);
         return [];
@@ -331,7 +635,7 @@
         runeRows[rune] = { row, bottomCell, topCell, medianCell, avgCell };
       });
 
-      const concurrency = 4;
+      const concurrency = 8;
       let completed = 0;
 
       async function runBatches() {
@@ -345,15 +649,17 @@
                 const prices = await getRunePrices(rune);
                 let result;
                 if (prices.length > 0) {
-                  const pricesM = prices.map(p => p / 1_000_000);
-                  const avg = Math.ceil(pricesM.reduce((a, b) => a + b, 0) / pricesM.length);
-                  const median = Math.ceil(calculateMedian(pricesM));
+                  const sortedGold = [...prices].sort((a, b) => a - b);
+                  const minGold = sortedGold[0];
+                  const maxGold = sortedGold[sortedGold.length - 1];
+                  const medianGold = calculateMedian(sortedGold);
+                  const avgGold = sortedGold.reduce((a, b) => a + b, 0) / sortedGold.length;
                   result = {
                     rune,
-                    topPrice: Math.max(...pricesM),
-                    bottomPrice: Math.min(...pricesM),
-                    medianPrice: median,
-                    avgPrice: avg
+                    topPrice: Math.ceil(maxGold / 1_000_000),
+                    bottomPrice: Math.ceil(minGold / 1_000_000),
+                    medianPrice: Math.ceil(medianGold / 1_000_000),
+                    avgPrice: Math.ceil(avgGold / 1_000_000)
                   };
                 } else {
                   result = {
@@ -366,10 +672,10 @@
                 }
                 // Update the table row for this rune
                 const { bottomCell, topCell, medianCell, avgCell } = runeRows[rune];
-                bottomCell.textContent = result.bottomPrice ? result.bottomPrice.toLocaleString(undefined, {maximumFractionDigits: 2}) + 'm' : '0';
-                topCell.textContent = result.topPrice ? result.topPrice.toLocaleString(undefined, {maximumFractionDigits: 2}) + 'm' : '0';
-                medianCell.textContent = result.medianPrice ? result.medianPrice.toLocaleString(undefined, {maximumFractionDigits: 2}) + 'm' : '0';
-                avgCell.textContent = result.avgPrice ? result.avgPrice.toLocaleString() + 'm' : '0';
+                bottomCell.textContent = Number.isFinite(result.bottomPrice) && result.bottomPrice > 0 ? result.bottomPrice.toLocaleString() + 'm' : '0';
+                topCell.textContent = Number.isFinite(result.topPrice) && result.topPrice > 0 ? result.topPrice.toLocaleString() + 'm' : '0';
+                medianCell.textContent = Number.isFinite(result.medianPrice) && result.medianPrice > 0 ? result.medianPrice.toLocaleString() + 'm' : '0';
+                avgCell.textContent = Number.isFinite(result.avgPrice) && result.avgPrice > 0 ? result.avgPrice.toLocaleString() + 'm' : '0';
                 runeResults[rune] = result;
                 completed++;
                 loading.textContent = `Loading runes... (${completed}/${runes.length})`;
@@ -389,6 +695,7 @@
       while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
       // Sort runes by avgPrice descending
       const sortedRunes = Object.values(runeResults)
+        .filter(res => [res.bottomPrice, res.topPrice, res.medianPrice, res.avgPrice].some(v => Number.isFinite(v) && v > 0))
         .sort((a, b) => b.avgPrice - a.avgPrice)
         .map(res => res.rune);
       // Append rows in sorted order
@@ -405,8 +712,17 @@
 
   // Run when page is ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', addButtonWhenReady);
+    document.addEventListener('DOMContentLoaded', () => {
+      ensureButtonObserver();
+      setTimeout(addButtonWhenReady, 1500);
+    });
   } else {
-    addButtonWhenReady();
+    ensureButtonObserver();
+    setTimeout(addButtonWhenReady, 1500);
   }
+
+  window.addEventListener('load', () => {
+    ensureButtonObserver();
+    queueAddButton();
+  });
 })();
