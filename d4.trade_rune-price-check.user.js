@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Diablo Trade Rune Price Checker
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Adds a button to check rune prices on diablo.trade
 // @author       Le Vagabond
 // @match        https://diablo.trade/*
@@ -14,14 +14,117 @@
 (function() {
   'use strict';
 
-  const NEXT_HEADERS_FALLBACK = {
-    nextAction: '60102b850c82b26db68018c0d07efd8b20f687d07b',
-    nextRouterStateTree: '%5B%22%22%2C%7B%22children%22%3A%5B%22(app)%22%2C%7B%22children%22%3A%5B%22(session)%22%2C%7B%22children%22%3A%5B%22listings%22%2C%7B%22children%22%3A%5B%22(search)%22%2C%7B%22children%22%3A%5B%22items%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D'
-  };
+  async function searchJsFilesForNextAction() {
+    try {
+      const scripts = document.querySelectorAll('script[src]');
+      const resources = performance.getEntriesByType('resource');
+      const jsResources = resources.filter(r => 
+        r.initiatorType === 'script' || 
+        r.name.endsWith('.js') || 
+        r.name.includes('.js?')
+      );
+
+      const jsUrls = new Set();
+      scripts.forEach(script => {
+        if (script.src) jsUrls.add(script.src);
+      });
+      jsResources.forEach(resource => {
+        jsUrls.add(resource.name);
+      });
+
+      for (const url of jsUrls) {
+        try {
+          const response = await fetch(url, { cache: 'force-cache' });
+          const content = await response.text();
+
+          if (content.includes('unifiedSearchAction')) {
+            const searchString = 'unifiedSearchAction';
+            let index = content.indexOf(searchString);
+            
+            while (index !== -1) {
+              let parenStart = content.indexOf('(', index);
+              
+              if (parenStart !== -1) {
+                let parenCount = 1;
+                let parenEnd = parenStart + 1;
+                
+                while (parenEnd < content.length && parenCount > 0) {
+                  if (content[parenEnd] === '(') {
+                    parenCount++;
+                  } else if (content[parenEnd] === ')') {
+                    parenCount--;
+                  }
+                  parenEnd++;
+                }
+                
+                if (parenCount === 0) {
+                  let contextStart = index;
+                  while (contextStart > 0 && content[contextStart] !== ';') {
+                    contextStart--;
+                  }
+                  if (content[contextStart] === ';') {
+                    contextStart++;
+                  }
+                  
+                  let contextEnd = parenEnd;
+                  while (contextEnd < content.length && content[contextEnd] !== ';') {
+                    contextEnd++;
+                  }
+                  if (content[contextEnd] === ';') {
+                    contextEnd++;
+                  }
+                  
+                  const context = content.substring(contextStart, contextEnd).trim();
+                  
+                  if (context.length > 0) {
+                    const refIndex = context.indexOf('createServerReference');
+                    if (refIndex !== -1) {
+                      const openParen = context.indexOf('(', refIndex);
+                      if (openParen !== -1) {
+                        const firstQuote = context.indexOf('"', openParen);
+                        const firstSingleQuote = context.indexOf("'", openParen);
+                        
+                        let quotePos = -1;
+                        let quoteChar = '"';
+                        if (firstQuote !== -1 && (firstSingleQuote === -1 || firstQuote < firstSingleQuote)) {
+                          quotePos = firstQuote;
+                          quoteChar = '"';
+                        } else if (firstSingleQuote !== -1) {
+                          quotePos = firstSingleQuote;
+                          quoteChar = "'";
+                        }
+                        
+                        if (quotePos !== -1) {
+                          const closeQuote = context.indexOf(quoteChar, quotePos + 1);
+                          if (closeQuote !== -1) {
+                            const hash = context.substring(quotePos + 1, closeQuote);
+                            console.log('[Rune Price Checker] Found nextAction hash:', hash);
+                            nextHeadersCache.nextAction = hash;
+                            nextHeadersCache.updatedAt = Date.now();
+                            return hash;
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              
+              index = content.indexOf(searchString, index + 1);
+            }
+          }
+        } catch (err) {
+        }
+      }
+    } catch (error) {
+      console.error('[Rune Price Checker] Error searching for nextAction:', error);
+    }
+    return null;
+  }
 
   const nextHeadersCache = {
     nextAction: null,
-    nextRouterStateTree: null,
+    nextRouterStateTree: '%5B%22%22%2C%7B%22children%22%3A%5B%22(app)%22%2C%7B%22children%22%3A%5B%22(session)%22%2C%7B%22children%22%3A%5B%22listings%22%2C%7B%22children%22%3A%5B%22(search)%22%2C%7B%22children%22%3A%5B%22items%22%2C%7B%22children%22%3A%5B%22__PAGE__%22%2C%7B%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%5D%7D%2Cnull%2Cnull%2Ctrue%5D',
     updatedAt: 0
   };
 
@@ -98,19 +201,20 @@
 
   installFetchCaptureHook();
 
-  function getListingsItemsNextHeaders() {
-    const nextAction = nextHeadersCache.nextAction || NEXT_HEADERS_FALLBACK.nextAction;
-    const nextRouterStateTree = nextHeadersCache.nextRouterStateTree || NEXT_HEADERS_FALLBACK.nextRouterStateTree;
+  async function getListingsItemsNextHeaders() {
+    let nextAction = nextHeadersCache.nextAction;
 
-    if (!nextHeadersCache.nextAction || !nextHeadersCache.nextRouterStateTree) {
-      console.warn(
-        '[Rune Price Checker] Using fallback Next headers. If searches start failing after a diablo.trade deploy, reload and let the page load once so the script can auto-capture new headers.'
-      );
+    if (!nextAction) {
+      console.log('[Rune Price Checker] nextAction not in cache, searching JS files...');
+      nextAction = await searchJsFilesForNextAction();
+      if (!nextAction) {
+        throw new Error('Could not find nextAction in any JS files');
+      }
     }
 
     return {
       'next-action': nextAction,
-      'next-router-state-tree': nextRouterStateTree
+      'next-router-state-tree': nextHeadersCache.nextRouterStateTree
     };
   }
 
@@ -324,7 +428,7 @@
   }
 
   // Main logic moved to a function
-  function showRunePriceChecker() {
+  async function showRunePriceChecker() {
     // Prevent multiple containers
     if (document.getElementById('rune-price-checker-container')) return;
 
@@ -452,6 +556,17 @@
     document.body.appendChild(container);
     container.appendChild(table);
 
+    // Ensure headers are populated before fetching prices
+    try {
+      loading.textContent = 'Initializing headers...';
+      await getListingsItemsNextHeaders();
+      loading.textContent = 'Loading rune prices...';
+    } catch (error) {
+      loading.textContent = 'Error: ' + error.message;
+      console.error('[Rune Price Checker]', error);
+      return;
+    }
+
     // Add indicator for data source
     const info = document.createElement('div');
     info.textContent = 'Showing prices from online SELL listings (first 100 results, outliers removed)';
@@ -531,7 +646,7 @@
       formData.append("0", JSON.stringify([{ "error": "" }, "$K1"]));
 
       try {
-        const nextHeaders = getListingsItemsNextHeaders();
+        const nextHeaders = await getListingsItemsNextHeaders();
         const searchResponse = await fetch("https://diablo.trade/listings/items", {
           method: "POST",
           headers: {
