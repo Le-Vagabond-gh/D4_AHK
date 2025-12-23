@@ -21,12 +21,14 @@ return
 CheckKeys:
 if GetKeyState("LButton", "P") && GetKeyState("Space", "P")
 {
-    if (A_TickCount - LastEPress >= 8000) {
+    if (A_TickCount - LastEPress >= 2000) {
         Send, {Blind}r
         LastEPress := A_TickCount
     }
 
-	Send, {Blind}$
+	Send, {Blind}h
+	Send, {Blind}e
+	; Send, {Blind}$
 	Send, {Blind}a
 	Send, {Blind}z
 	Send, {Blind}g
@@ -34,7 +36,7 @@ if GetKeyState("LButton", "P") && GetKeyState("Space", "P")
 if GetKeyState("RButton", "P") && GetKeyState("Space", "P")
 {
 
-	Send, {Blind}$
+	Send, {Blind}h
 	Send, {Blind}a
 	Send, {Blind}z
 	Send, {Blind}g

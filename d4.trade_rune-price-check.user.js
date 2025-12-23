@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Diablo Trade Rune Price Checker
 // @namespace    http://tampermonkey.net/
-// @version      1.4
+// @version      1.5
 // @description  Adds a button to check rune prices on diablo.trade
 // @author       Le Vagabond
 // @match        https://diablo.trade/*
@@ -575,13 +575,35 @@
     info.style.margin = '8px 0 0 0';
     container.appendChild(info);
 
-    // Helper function to filter outliers using the IQR method
+    // Helper function to filter outliers using median-based pre-filter + IQR method
     function filterOutliers(prices) {
-      const sorted = (prices || [])
+      let sorted = (prices || [])
         .filter(p => typeof p === 'number' && Number.isFinite(p) && p > 0)
         .sort((a, b) => a - b);
 
+      if (sorted.length === 0) return sorted;
+
+      // For small datasets (< 4), still apply median-based filtering
+      if (sorted.length < 4) {
+        const med = calculateMedian(sorted);
+        if (med > 0) {
+          return sorted.filter(p => p >= med * 0.1 && p <= med * 3);
+        }
+        return sorted;
+      }
+
+      // First pass: apply median-based filter to remove extreme outliers before IQR
+      // This prevents outliers from inflating Q3 and making IQR ineffective
+      const initialMedian = calculateMedian(sorted);
+      if (initialMedian > 0) {
+        const preFilterCeiling = initialMedian * 3; // Cap at 3x median before IQR
+        const preFilterFloor = initialMedian * 0.1;
+        sorted = sorted.filter(p => p >= preFilterFloor && p <= preFilterCeiling);
+      }
+
       if (sorted.length < 4) return sorted;
+
+      // Second pass: apply IQR method on the pre-filtered data
       const q1 = sorted[Math.floor((sorted.length / 4))];
       const q3 = sorted[Math.floor((sorted.length * (3 / 4)))];
       const iqr = q3 - q1;
@@ -593,12 +615,6 @@
       if (filtered.length >= 4) {
         const trim = filtered.length >= 20 ? Math.floor(filtered.length * 0.05) : 0;
         if (trim > 0) filtered = filtered.slice(trim, filtered.length - trim);
-
-        const med = calculateMedian(filtered);
-        if (med > 0) {
-          const relativeFloor = med * 0.10;
-          filtered = filtered.filter(p => p >= relativeFloor);
-        }
       }
 
       return filtered;
@@ -691,7 +707,10 @@
           .map(i => i && i.rawPrice)
           .filter(p => typeof p === 'number' && !isNaN(p) && p > 0);
 
-        return filterOutliers(prices);
+        const filtered = filterOutliers(prices);
+        console.log(`[${rune}] raw prices:`, prices.map(p => p / 1_000_000).sort((a,b) => a-b));
+        console.log(`[${rune}] filtered prices:`, filtered.map(p => p / 1_000_000).sort((a,b) => a-b));
+        return filtered;
       } catch (error) {
         console.error(`Error fetching ${rune}:`, error);
         return [];
